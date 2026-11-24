@@ -49,14 +49,20 @@ Set `NEWS_SMTP_HOST`, `NEWS_SMTP_PORT`, `NEWS_SMTP_USER`, `NEWS_SMTP_PASSWORD` a
 `app.py` is the Vercel WSGI entrypoint. `vercel.json` builds the React app and routes
 all requests through Flask so the SPA bootstrap, API, and image proxy keep working.
 
-The build generates `server/deployment_secret.txt` once, so sessions and CSRF tokens
-stay valid across serverless invocations. You can override it with `NEWS_SECRET` in
-Vercel Project Settings → Environment Variables (recommended for production).
+The build generates `server/deployment_secret.txt` once per deployment, so sessions and
+CSRF tokens stay valid across serverless invocations. Set `NEWS_SECRET` in Vercel
+Project Settings → Environment Variables to keep sessions valid across redeploys too.
 
 Optional Vercel environment variables:
 
-- `NEWS_SECRET` — overrides the generated deployment secret.
+- `NEWS_SECRET` — long random value; overrides the generated deployment secret.
+- `NEWS_DB` — connection string to a persistent database (accounts and saved stories).
 - `NEWS_SMTP_*` — for password recovery email.
+
+A compact article bundle in `data/seed_articles.json` is loaded when a cold function
+starts with an empty `/tmp` database, so the newsroom is never blank. Accounts are
+also mirrored into the signed session so an existing login survives a cold start.
+For fully persistent accounts, saved stories, and history, use `NEWS_DB`.
 
 Vercel functions have a read-only filesystem except `/tmp`, so `NEWS_DB` defaults to
 `/tmp/feedline.db` on Vercel. That database is ephemeral. For persistent accounts,

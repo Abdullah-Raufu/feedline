@@ -1571,6 +1571,14 @@ def refresh_session_account():
         sync_session_account(fetchone("SELECT * FROM users WHERE id = ?", (user["id"],)))
 
 
+def clear_auth_session():
+    """Log out, but keep the account hint so login still works on cold starts."""
+    account = session.get("account")
+    session.clear()
+    if account:
+        session["account"] = account
+
+
 def restore_account_from_session():
     """Recreate this user on a cold Vercel instance with an empty /tmp DB."""
     data = session.get("account")
@@ -5022,8 +5030,20 @@ def api_login():
         return jsonify(ok=False, error=t("err_rate")), 429
     row = fetchone("SELECT * FROM users WHERE username_lower = ?", (username.casefold(),))
     if not row or not check_password_hash(row["password_hash"], password):
-        record_fail(limit_key)
-        return jsonify(ok=False, error=t("err_credentials")), 401
+        # A cold Vercel instance may have an empty /tmp database. The signed
+        # session keeps the last account so login works without re-signup.
+        account = session.get("account")
+        if (
+            isinstance(account, dict)
+            and account.get("username_lower") == username.casefold()
+            and account.get("password_hash")
+            and check_password_hash(account["password_hash"], password)
+            and restore_account_from_session()
+        ):
+            row = fetchone("SELECT * FROM users WHERE id = ?", (account.get("id"),))
+        if not row or not check_password_hash(row["password_hash"], password):
+            record_fail(limit_key)
+            return jsonify(ok=False, error=t("err_credentials")), 401
     clear_fails(limit_key)
     session.clear()
     session["uid"] = row["id"]
@@ -5395,14 +5415,14 @@ def api_profile_prefs():
 @app.route("/api/auth/logout", methods=["POST"])
 @api_required
 def api_logout():
-    session.clear()
+    clear_auth_session()
     return jsonify(ok=True)
 
 
 @app.route("/logout", methods=["POST"])
 @login_required
 def logout():
-    session.clear()
+    clear_auth_session()
     return redirect(url_for("login"))
 
 
