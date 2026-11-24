@@ -1272,16 +1272,19 @@ def load_secret():
     env = os.environ.get("NEWS_SECRET")
     if env:
         return env
-    path = BASE_DIR / ".news_secret"
-    try:
-        value = path.read_text(encoding="utf-8").strip()
-        if value:
-            return value
-    except OSError:
-        pass
+    # Local runs use .news_secret. Vercel builds generate deployment_secret.txt
+    # once, so every serverless invocation shares the same signing key.
+    for name in (".news_secret", "deployment_secret.txt"):
+        path = BASE_DIR / name
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+        except OSError:
+            pass
     value = secrets.token_hex(32)
     try:
-        path.write_text(value, encoding="utf-8")
+        (BASE_DIR / "deployment_secret.txt").write_text(value, encoding="utf-8")
     except OSError:
         pass
     return value

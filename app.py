@@ -5,7 +5,6 @@ served by the Flask routes in server/feedline.py.
 """
 
 import os
-import secrets
 import sys
 import tempfile
 from pathlib import Path
@@ -17,11 +16,9 @@ sys.path.insert(0, str(ROOT))
 # database path in /tmp unless a real database is configured with NEWS_DB.
 os.environ.setdefault("NEWS_DB", str(Path(tempfile.gettempdir()) / "feedline.db"))
 
-# Set NEWS_SECRET in Vercel Project Settings to keep sessions stable across
-# cold starts. A generated fallback keeps the preview deploy usable.
-if not os.environ.get("NEWS_SECRET"):
-    os.environ["NEWS_SECRET"] = secrets.token_hex(32)
-
+# The Flask app reads NEWS_SECRET first, then server/deployment_secret.txt.
+# scripts/prepare-vercel.mjs creates that file during the Vercel build so every
+# serverless invocation shares one secret and sessions stay valid.
 from server.feedline import app  # noqa: E402
 
 __all__ = ["app"]

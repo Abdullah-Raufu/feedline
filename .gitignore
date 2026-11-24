@@ -8,6 +8,7 @@ dist/
 server/feedline.db
 server/feedline.db-*
 server/.news_secret
+server/deployment_secret.txt
 .env
 .env.*
 
