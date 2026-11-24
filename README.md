@@ -43,3 +43,20 @@ running too; the app expects the API at `127.0.0.1:5000`.
 
 Set `NEWS_SMTP_HOST`, `NEWS_SMTP_PORT`, `NEWS_SMTP_USER`, `NEWS_SMTP_PASSWORD` and
 `NEWS_SMTP_FROM` before starting the server, as described in `server/SMTP_SETUP.md`.
+
+## Deploy to Vercel
+
+`app.py` is the Vercel WSGI entrypoint. `vercel.json` builds the React app and routes
+all requests through Flask so the SPA bootstrap, API, and image proxy keep working.
+
+Set these Vercel environment variables:
+
+- `NEWS_SECRET` — a long random value; keeps sessions stable across cold starts.
+- `NEWS_SMTP_*` — optional, for password recovery email.
+
+Vercel functions have a read-only filesystem except `/tmp`, so `NEWS_DB` defaults to
+`/tmp/feedline.db` on Vercel. That database is ephemeral. For persistent accounts,
+saved stories, and news history, connect an external database and set `NEWS_DB` to it.
+The long-running refresh loops only start with `npm run server`; use a scheduled job
+or external worker to refresh news on Vercel.
+
