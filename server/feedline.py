@@ -1492,6 +1492,30 @@ def init_db():
                 )
             except sqlite3.OperationalError:
                 pass
+        # Vercel starts each cold invocation with an empty /tmp database.
+        # Seed a compact article bundle so the newsroom is never blank.
+        if conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0] == 0:
+            seed_path = BASE_DIR.parent / "data" / "seed_articles.json"
+            try:
+                items = json.loads(seed_path.read_text(encoding="utf-8"))
+                if items:
+                    newest = max(int(item.get("published") or 0) for item in items)
+                    shift = int(time.time()) - newest - 60
+                    for item in items:
+                        item["published"] = int(item.get("published") or 0) + shift
+                        item["ingested"] = int(item.get("ingested") or item["published"]) + shift
+                columns = (
+                    "link", "title", "summary", "source", "category", "published",
+                    "ingested", "image", "country", "image_tried",
+                )
+                conn.executemany(
+                    "INSERT OR IGNORE INTO articles "
+                    "(link, title, summary, source, category, published, ingested, "
+                    "image, country, image_tried) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [tuple(item.get(column) for column in columns) for item in items],
+                )
+            except (OSError, ValueError, sqlite3.Error):
+                pass
         conn.commit()
     finally:
         conn.close()
@@ -1518,6 +1542,66 @@ def csrf_token():
 
 def current_user():
     return getattr(g, "user", None)
+
+
+ACCOUNT_KEYS = (
+    "id", "username", "username_lower", "email", "email_lower", "password_hash",
+    "country", "language", "theme", "view_mode", "reader_font", "welcome_done",
+    "created",
+)
+
+
+def account_snapshot(row):
+    """Compact copy of a user row kept in the signed session cookie."""
+    if not row:
+        return None
+    keys = row.keys()
+    return {key: row[key] for key in ACCOUNT_KEYS if key in keys}
+
+
+def sync_session_account(row):
+    data = account_snapshot(row)
+    if data:
+        session["account"] = data
+
+
+def refresh_session_account():
+    user = current_user()
+    if user:
+        sync_session_account(fetchone("SELECT * FROM users WHERE id = ?", (user["id"],)))
+
+
+def restore_account_from_session():
+    """Recreate this user on a cold Vercel instance with an empty /tmp DB."""
+    data = session.get("account")
+    if not isinstance(data, dict) or not data.get("id"):
+        return None
+    try:
+        execute(
+            """
+            INSERT OR IGNORE INTO users
+                (id, username, username_lower, email, email_lower, password_hash,
+                 country, language, theme, view_mode, reader_font, welcome_done, created)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            tuple(
+                data.get(key, default)
+                for key, default in (
+                    ("id", 0), ("username", ""), ("username_lower", ""),
+                    ("email", ""), ("email_lower", ""), ("password_hash", ""),
+                    ("country", "US"), ("language", "en"), ("theme", "classic"),
+                    ("view_mode", "grid"), ("reader_font", "serif"),
+                    ("welcome_done", 0), ("created", int(time.time())),
+                )
+            ),
+        )
+    except sqlite3.Error:
+        return None
+    row = fetchone("SELECT * FROM users WHERE id = ?", (data["id"],))
+    if row:
+        session["uid"] = row["id"]
+        session["lang"] = row["language"]
+    return row
 
 
 def login_required(view):
@@ -1681,6 +1765,8 @@ def before_request():
     uid = session.get("uid")
     if uid:
         row = fetchone("SELECT * FROM users WHERE id = ?", (uid,))
+        if not row:
+            row = restore_account_from_session()
         if row:
             g.user = row
             g.lang = row["language"]
@@ -4900,10 +4986,12 @@ def api_signup():
         )
     except sqlite3.IntegrityError:
         return jsonify(ok=False, error=t("err_exists")), 409
+    new_row = fetchone("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,))
     session.clear()
     session["uid"] = cursor.lastrowid
     session["lang"] = "en"
     session.permanent = remember
+    sync_session_account(new_row)
     return jsonify(ok=True, next="/welcome")
 
 
@@ -4941,6 +5029,7 @@ def api_login():
     session["uid"] = row["id"]
     session["lang"] = row["language"]
     session.permanent = remember
+    sync_session_account(row)
     return jsonify(ok=True, next="/" if row["welcome_done"] else "/welcome")
 
 
@@ -5067,10 +5156,12 @@ def api_reset_password():
     clear_fails(user["username_lower"].casefold() + "|" + ip)
     clear_fails(username.casefold() + "|" + ip)
 
+    fresh = fetchone("SELECT * FROM users WHERE id = ?", (row["user_id"],))
     session.clear()
     session["uid"] = row["user_id"]
     session["lang"] = user["language"]
     session.permanent = remember
+    sync_session_account(fresh)
     return jsonify(ok=True, next="/" if user["welcome_done"] else "/welcome")
 
 
@@ -5091,6 +5182,7 @@ def api_welcome():
         (language, g.user["id"]),
     )
     session["lang"] = language
+    refresh_session_account()
     return jsonify(ok=True)
 
 @app.route("/profile")
@@ -5226,6 +5318,7 @@ def api_profile_username():
             "UPDATE users SET username = ?, username_lower = ? WHERE id = ?",
             (new_name, new_name.casefold(), g.user["id"]),
         )
+        refresh_session_account()
     return jsonify(ok=True)
 
 
@@ -5250,6 +5343,7 @@ def api_profile_password():
         "UPDATE users SET password_hash = ? WHERE id = ?",
         (generate_password_hash(new), g.user["id"]),
     )
+    refresh_session_account()
     return jsonify(ok=True)
 
 
@@ -5294,6 +5388,7 @@ def api_profile_prefs():
     session["lang"] = language
     if country != old_country:
         country_state.pop(country, None)
+    refresh_session_account()
     return jsonify(ok=True)
 
 
