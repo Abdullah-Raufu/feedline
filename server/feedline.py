@@ -1516,6 +1516,47 @@ def init_db():
                 )
             except (OSError, ValueError, sqlite3.Error):
                 pass
+        # Keep the original account available even when Vercel wipes /tmp.
+        # Upsert on every cold start so a stale password hash cannot lock the
+        # user out after a redeploy.
+        user_seed_path = BASE_DIR.parent / "data" / "seed_users.json"
+        try:
+            users = json.loads(user_seed_path.read_text(encoding="utf-8"))
+            columns = (
+                "username", "username_lower", "email", "email_lower", "password_hash",
+                "country", "language", "theme", "view_mode", "reader_font",
+                "welcome_done", "created",
+            )
+            defaults = {
+                "username": "", "username_lower": "", "email": "", "email_lower": "",
+                "password_hash": "", "country": "US", "language": "en",
+                "theme": "classic", "view_mode": "grid", "reader_font": "serif",
+                "welcome_done": 0, "created": int(time.time()),
+            }
+            placeholders = ", ".join("?" for _ in columns)
+            updates = ", ".join(
+                f"{column} = excluded.{column}"
+                for column in columns
+                if column not in ("username_lower", "created")
+            )
+            upsert = (
+                f"INSERT INTO users ({', '.join(columns)}) VALUES ({placeholders}) "
+                f"ON CONFLICT(username_lower) DO UPDATE SET {updates}"
+            )
+            for user in users:
+                values = tuple(user.get(column, defaults[column]) for column in columns)
+                try:
+                    conn.execute(upsert, values)
+                except sqlite3.IntegrityError:
+                    # Another row may already own that email; seed without it.
+                    values = tuple(
+                        "" if column in ("email", "email_lower")
+                        else user.get(column, defaults[column])
+                        for column in columns
+                    )
+                    conn.execute(upsert, values)
+        except (OSError, ValueError, sqlite3.Error):
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -5021,6 +5062,7 @@ def api_login():
     username = normalize_username(data.get("username"))
     password = data.get("password", "")
     remember = bool(data.get("remember"))
+    email_identifier = normalize_email(username)
     limit_key = (username.casefold() or "-") + "|" + (request.remote_addr or "-")
     if current_user():
         return jsonify(ok=True, next="/")
@@ -5029,13 +5071,21 @@ def api_login():
     if rate_limited(limit_key):
         return jsonify(ok=False, error=t("err_rate")), 429
     row = fetchone("SELECT * FROM users WHERE username_lower = ?", (username.casefold(),))
+    if not row and email_identifier:
+        row = fetchone("SELECT * FROM users WHERE email_lower = ?", (email_identifier,))
     if not row or not check_password_hash(row["password_hash"], password):
         # A cold Vercel instance may have an empty /tmp database. The signed
         # session keeps the last account so login works without re-signup.
         account = session.get("account")
-        if (
+        matches_account = (
             isinstance(account, dict)
-            and account.get("username_lower") == username.casefold()
+            and (
+                account.get("username_lower") == username.casefold()
+                or (email_identifier and account.get("email_lower") == email_identifier)
+            )
+        )
+        if (
+            matches_account
             and account.get("password_hash")
             and check_password_hash(account["password_hash"], password)
             and restore_account_from_session()

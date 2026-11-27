@@ -60,9 +60,11 @@ Optional Vercel environment variables:
 - `NEWS_SMTP_*` — for password recovery email.
 
 A compact article bundle in `data/seed_articles.json` is loaded when a cold function
-starts with an empty `/tmp` database, so the newsroom is never blank. Accounts are
-also mirrored into the signed session so an existing login survives a cold start.
-For fully persistent accounts, saved stories, and history, use `NEWS_DB`.
+starts with an empty `/tmp` database, so the newsroom is never blank. The original
+`Abdullah` account is restored from `data/seed_users.json` on every cold start, and
+accounts are also mirrored into the signed session so an existing login survives a
+cold start. Login accepts either the username or the email address. For fully
+persistent accounts, saved stories, and history, use `NEWS_DB`.
 
 Vercel functions have a read-only filesystem except `/tmp`, so `NEWS_DB` defaults to
 `/tmp/feedline.db` on Vercel. That database is ephemeral. For persistent accounts,

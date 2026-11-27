@@ -122,8 +122,8 @@ export default function AuthPage({ path, navigate }) {
             <input type="hidden" name="_csrf" value={BOOT.csrf || ''} />
             <input type="hidden" name="remember" value="" data-credential-remember />
             <label className="field">
-              <span>{tr('username', 'Username')}</span>
-              <input name="username" data-credential-username value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Your username" required />
+              <span>{tr('username', mode === 'login' ? 'Username or email' : 'Username')}</span>
+              <input name="username" data-credential-username value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder={mode === 'login' ? 'Your username or email' : 'Your username'} required />
             </label>
 
             {mode === 'signup' && (

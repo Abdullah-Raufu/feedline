@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "username": "Abdullah",
+    "username_lower": "abdullah",
+    "email": "raufuabdullahmail@gmail.com",
+    "email_lower": "raufuabdullahmail@gmail.com",
+    "password_hash": "scrypt:32768:8:1$OrTxmHuiXLZf5hbc$e5eb0855fa88de391bf531731ffdf86235e3c6fedb18aa718cd3ba6c275ba44c7e9fe4c83f9fe5256849a0cdb4d0953ee5f187a189d6c751eeecbfe1abc1419a",
+    "country": "NG",
+    "language": "en",
+    "theme": "classic",
+    "view_mode": "grid",
+    "reader_font": "serif",
+    "welcome_done": 1,
+    "created": 1795336740
+  }
+]
