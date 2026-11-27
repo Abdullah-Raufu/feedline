@@ -6,6 +6,7 @@ import Saved from './components/Saved'
 import Pictures from './components/Pictures'
 import Reader from './components/Reader'
 import Profile from './components/Profile'
+import AdminPage from './components/AdminPage'
 
 const NAV = [
   { path: '/', label: 'Home', icon: Icon.Home },
@@ -13,6 +14,7 @@ const NAV = [
   { path: '/pictures', label: 'Pictures', icon: Icon.Camera },
   { path: '/profile', label: 'Profile', icon: Icon.User },
 ]
+const ADMIN_NAV = { path: '/admin', label: 'Admin', icon: Icon.Shield }
 
 export default function App({ url, navigate, path }) {
   const [search, setSearch] = useState('')
@@ -38,12 +40,14 @@ export default function App({ url, navigate, path }) {
     navigate(search.trim() ? `/?q=${encodeURIComponent(search.trim())}` : '/')
   }
 
+  const navItems = BOOT.user?.is_admin ? [...NAV, ADMIN_NAV] : NAV
   const isReader = path === '/read'
   let content
   if (isReader) content = <Reader url={url} navigate={navigate} />
   else if (path === '/saved') content = <Saved />
   else if (path === '/pictures') content = <Pictures />
   else if (path === '/profile' || path === '/settings') content = <Profile />
+  else if (path === '/admin') content = BOOT.user?.is_admin ? <AdminPage /> : <Home url={url} navigate={navigate} />
   else content = <Home url={url} navigate={navigate} />
 
   return (
@@ -53,7 +57,7 @@ export default function App({ url, navigate, path }) {
         <aside className="sidebar">
           <a href="/" onClick={(e) => go(e, '/')}><Brand /></a>
           <nav className="side-nav">
-            {NAV.map((item) => {
+            {navItems.map((item) => {
               const active = item.path === '/' ? path === '/' : path.startsWith(item.path)
               return (
                 <a key={item.path} href={item.path} onClick={(e) => go(e, item.path)}
@@ -94,6 +98,7 @@ export default function App({ url, navigate, path }) {
                 <div><b>{BOOT.user.username}</b><small>{BOOT.countries.find((c) => c.code === BOOT.user.country)?.name}</small></div>
                 <a href="/profile" onClick={(e) => go(e, '/profile')}><Icon.User width={16} height={16} /> Profile & settings</a>
                 <a href="/saved" onClick={(e) => go(e, '/saved')}><Icon.Bookmark width={16} height={16} /> Saved stories</a>
+                {BOOT.user?.is_admin && <a href="/admin" onClick={(e) => go(e, '/admin')}><Icon.Shield width={16} height={16} /> Admin panel</a>}
                 <button onClick={async () => { await api('/api/auth/logout', { method: 'POST', body: {} }); window.location.href = '/login' }}>
                   <Icon.Logout width={16} height={16} /> Sign out
                 </button>
@@ -119,7 +124,7 @@ export default function App({ url, navigate, path }) {
 
         {!isReader && (
           <nav className="bottom-nav">
-            {NAV.map((item) => {
+            {navItems.map((item) => {
               const active = item.path === '/' ? path === '/' : path.startsWith(item.path)
               return <a key={item.path} href={item.path} onClick={(e) => go(e, item.path)} className={active ? 'active' : ''}>
                 <item.icon width={20} height={20} /><span>{item.label}</span>

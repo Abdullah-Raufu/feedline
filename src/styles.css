@@ -587,3 +587,38 @@ img { display: block; max-width: 100%; }
   .lightbox-figure figcaption h3 { font-size: 17px; }
   .profile-hero { flex-wrap: wrap; }
 }
+
+/* ================================================================= admin */
+.admin-head-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.admin-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.admin-stat { display: grid; gap: 3px; padding: 16px; }
+.admin-stat span { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.admin-stat b { font-size: 26px; line-height: 1.1; color: var(--accent); }
+.admin-stat small { font-size: 11px; color: var(--muted); }
+.admin-panel { margin-bottom: 20px; }
+.admin-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.admin-filter {
+  border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+  border-radius: 999px; padding: 7px 13px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.admin-filter.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.table-wrap { overflow-x: auto; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 560px; }
+.admin-table th {
+  text-align: start; padding: 10px 12px; color: var(--muted); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line);
+}
+.admin-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.admin-table tr:last-child td { border-bottom: 0; }
+.admin-table td b { display: block; font-size: 12.5px; }
+.admin-table td small { display: block; color: var(--muted); font-size: 10.5px; margin-top: 2px; }
+.admin-when { white-space: nowrap; color: var(--muted); }
+.admin-kind { display: inline-block; padding: 4px 9px; border-radius: 999px; background: var(--chip); color: var(--accent); font-weight: 800; font-size: 10.5px; white-space: nowrap; }
+.admin-status { display: inline-block; padding: 4px 9px; border-radius: 999px; font-weight: 800; font-size: 10.5px; white-space: nowrap; }
+.admin-status.ok { background: #ecfdf5; color: #047857; }
+.admin-status.fail { background: #fef2f2; color: #b91c1c; }
+.admin-user { display: flex; align-items: center; gap: 9px; }
+.admin-user em { font-style: normal; font-size: 9px; font-weight: 800; color: var(--accent); text-transform: uppercase; }
+.admin-empty { text-align: center; color: var(--muted); padding: 26px 12px; }
+.admin-note { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; margin: 4px 0 0; }
+.admin-note code { font-size: 11px; background: var(--chip); color: var(--accent); padding: 2px 6px; border-radius: 6px; }

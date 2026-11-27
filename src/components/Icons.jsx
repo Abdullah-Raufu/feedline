@@ -32,6 +32,7 @@ export const Icon = {
   Spark: (p) => <svg {...base} {...p}><path d="M12 2.5 14 9l6.5 2-6.5 2-2 6.5L10 13l-6.5-2L10 9z" /></svg>,
   Logout: (p) => <svg {...base} {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>,
   Font: (p) => <svg {...base} {...p}><path d="M4 19 9.5 5h2L17 19" /><path d="M5.5 14h10" /><path d="M19 12h3M20.5 10.5v3" /></svg>,
+  Shield: (p) => <svg {...base} {...p}><path d="M12 3 4.5 6v5.5c0 4.2 3 7.6 7.5 9.5 4.5-1.9 7.5-5.3 7.5-9.5V6Z" /><path d="m9 12 2 2 4-4" /></svg>,
 }
 
 export function Brand({ compact = false }) {

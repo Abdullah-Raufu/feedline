@@ -1406,6 +1406,18 @@ def init_db():
                 view_mode TEXT NOT NULL DEFAULT 'grid',
                 reader_font TEXT NOT NULL DEFAULT 'serif',
                 welcome_done INTEGER NOT NULL DEFAULT 0,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                created INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS activity_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                user_id INTEGER,
+                identifier TEXT NOT NULL DEFAULT '',
+                success INTEGER NOT NULL DEFAULT 1,
+                detail TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT '',
+                user_agent TEXT NOT NULL DEFAULT '',
                 created INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS saved (
@@ -1442,6 +1454,10 @@ def init_db():
                 ON articles(published);
             CREATE INDEX IF NOT EXISTS idx_saved_user
                 ON saved(user_id, saved_at);
+            CREATE INDEX IF NOT EXISTS idx_events_created
+                ON activity_events(created);
+            CREATE INDEX IF NOT EXISTS idx_events_kind
+                ON activity_events(kind, created);
             """
         )
         for column, ddl in (
@@ -1464,6 +1480,7 @@ def init_db():
             ("reader_font", "TEXT NOT NULL DEFAULT 'serif'"),
             ("email", "TEXT NOT NULL DEFAULT ''"),
             ("email_lower", "TEXT NOT NULL DEFAULT ''"),
+            ("is_admin", "INTEGER NOT NULL DEFAULT 0"),
         ):
             try:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {column} {ddl}")
@@ -1525,13 +1542,13 @@ def init_db():
             columns = (
                 "username", "username_lower", "email", "email_lower", "password_hash",
                 "country", "language", "theme", "view_mode", "reader_font",
-                "welcome_done", "created",
+                "welcome_done", "is_admin", "created",
             )
             defaults = {
                 "username": "", "username_lower": "", "email": "", "email_lower": "",
                 "password_hash": "", "country": "US", "language": "en",
                 "theme": "classic", "view_mode": "grid", "reader_font": "serif",
-                "welcome_done": 0, "created": int(time.time()),
+                "welcome_done": 0, "is_admin": 0, "created": int(time.time()),
             }
             placeholders = ", ".join("?" for _ in columns)
             updates = ", ".join(
@@ -1588,7 +1605,7 @@ def current_user():
 ACCOUNT_KEYS = (
     "id", "username", "username_lower", "email", "email_lower", "password_hash",
     "country", "language", "theme", "view_mode", "reader_font", "welcome_done",
-    "created",
+    "is_admin", "created",
 )
 
 
@@ -1630,8 +1647,9 @@ def restore_account_from_session():
             """
             INSERT OR IGNORE INTO users
                 (id, username, username_lower, email, email_lower, password_hash,
-                 country, language, theme, view_mode, reader_font, welcome_done, created)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 country, language, theme, view_mode, reader_font, welcome_done,
+                 is_admin, created)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             tuple(
                 data.get(key, default)
@@ -1640,7 +1658,8 @@ def restore_account_from_session():
                     ("email", ""), ("email_lower", ""), ("password_hash", ""),
                     ("country", "US"), ("language", "en"), ("theme", "classic"),
                     ("view_mode", "grid"), ("reader_font", "serif"),
-                    ("welcome_done", 0), ("created", int(time.time())),
+                    ("welcome_done", 0), ("is_admin", 0),
+                    ("created", int(time.time())),
                 )
             ),
         )
@@ -1673,6 +1692,71 @@ def api_required(view):
     def wrapped(*args, **kwargs):
         if not current_user():
             return jsonify(ok=False, error="auth_required"), 401
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def client_ip():
+    """Vercel puts the visitor IP in X-Forwarded-For."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()[:64]
+    return (request.remote_addr or "-")[:64]
+
+
+def log_event(kind, identifier="", success=True, detail="", user_id=None):
+    """Record an auth event. Never store passwords or OTP codes here."""
+    try:
+        execute(
+            """
+            INSERT INTO activity_events
+                (kind, user_id, identifier, success, detail, ip, user_agent, created)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                kind,
+                user_id,
+                str(identifier or "")[:120],
+                1 if success else 0,
+                str(detail or "")[:120],
+                client_ip(),
+                (request.headers.get("User-Agent") or "")[:200],
+                int(time.time()),
+            ),
+        )
+    except sqlite3.Error:
+        pass
+
+
+def is_admin(user=None):
+    user = user or current_user()
+    if not user:
+        return False
+    keys = user.keys()
+    if "is_admin" in keys and user["is_admin"]:
+        return True
+    allowed = {
+        value.strip().casefold()
+        for value in os.environ.get(
+            "NEWS_ADMIN_USERS", "abdullah,raufuabdullahmail@gmail.com"
+        ).split(",")
+        if value.strip()
+    }
+    identifiers = ("username_lower", "email_lower")
+    return any(
+        key in keys and user[key] and str(user[key]).casefold() in allowed
+        for key in identifiers
+    )
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user():
+            return jsonify(ok=False, error="auth_required"), 401
+        if not is_admin():
+            return jsonify(ok=False, error="admin_required"), 403
         return view(*args, **kwargs)
 
     return wrapped
@@ -1901,6 +1985,7 @@ def bootstrap_payload():
                 "view_mode": user["view_mode"],
                 "reader_font": user["reader_font"] if "reader_font" in user.keys() else "serif",
                 "welcome_done": bool(user["welcome_done"]),
+                "is_admin": is_admin(user),
             }
             if user
             else None
@@ -5019,8 +5104,10 @@ def api_signup():
     if password != confirm:
         return jsonify(ok=False, error=t("err_match")), 400
     if fetchone("SELECT id FROM users WHERE username_lower = ?", (username.casefold(),)):
+        log_event("signup", username, False, "username_taken")
         return jsonify(ok=False, error=t("err_exists")), 409
     if email and fetchone("SELECT id FROM users WHERE email_lower = ?", (email,)):
+        log_event("signup", email, False, "email_taken")
         return jsonify(ok=False, error=t("err_email_taken")), 409
     try:
         cursor = execute(
@@ -5034,7 +5121,9 @@ def api_signup():
              generate_password_hash(password), country, int(time.time())),
         )
     except sqlite3.IntegrityError:
+        log_event("signup", username, False, "conflict")
         return jsonify(ok=False, error=t("err_exists")), 409
+    log_event("signup", username, True, user_id=cursor.lastrowid)
     new_row = fetchone("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,))
     session.clear()
     session["uid"] = cursor.lastrowid
@@ -5065,10 +5154,15 @@ def api_login():
     email_identifier = normalize_email(username)
     limit_key = (username.casefold() or "-") + "|" + (request.remote_addr or "-")
     if current_user():
+        log_event(
+            "login", username, True, "already_signed_in", user_id=current_user()["id"]
+        )
         return jsonify(ok=True, next="/")
     if not username or not password:
+        log_event("login", username, False, "missing")
         return jsonify(ok=False, error=t("err_required")), 400
     if rate_limited(limit_key):
+        log_event("login", username, False, "rate_limited")
         return jsonify(ok=False, error=t("err_rate")), 429
     row = fetchone("SELECT * FROM users WHERE username_lower = ?", (username.casefold(),))
     if not row and email_identifier:
@@ -5093,7 +5187,9 @@ def api_login():
             row = fetchone("SELECT * FROM users WHERE id = ?", (account.get("id"),))
         if not row or not check_password_hash(row["password_hash"], password):
             record_fail(limit_key)
+            log_event("login", username, False, "bad_credentials")
             return jsonify(ok=False, error=t("err_credentials")), 401
+    log_event("login", row["username"], True, user_id=row["id"])
     clear_fails(limit_key)
     session.clear()
     session["uid"] = row["id"]
@@ -5125,6 +5221,7 @@ def api_forgot():
     user = fetchone("SELECT * FROM users WHERE email_lower = ?", (email,))
     if not user:
         record_fail(limit_key)
+        log_event("forgot", email, False, "not_found")
         return jsonify(ok=False, error=t("err_email_not_found")), 404
 
     execute("UPDATE password_resets SET used = 1 WHERE user_id = ? AND used = 0", (user["id"],))
@@ -5145,6 +5242,7 @@ def api_forgot():
         return jsonify(ok=False, error=t("err_email_send")), 503
 
     clear_fails(limit_key)
+    log_event("forgot", mask_email(email), True, user_id=user["id"])
     return jsonify(
         ok=True,
         reset_token=token,
@@ -5236,6 +5334,7 @@ def api_reset_password():
     session["lang"] = user["language"]
     session.permanent = remember
     sync_session_account(fresh)
+    log_event("reset", username, True, user_id=row["user_id"])
     return jsonify(
         ok=True,
         next="/" if user["welcome_done"] else "/welcome",
@@ -5272,6 +5371,14 @@ def profile():
 @app.route("/settings")
 @login_required
 def settings():
+    return spa_page()
+
+
+@app.route("/admin")
+@login_required
+def admin_page():
+    if not is_admin():
+        return redirect("/")
     return spa_page()
 
 
@@ -5422,6 +5529,7 @@ def api_profile_password():
         (generate_password_hash(new), g.user["id"]),
     )
     refresh_session_account()
+    log_event("password_change", g.user["username"], True, user_id=g.user["id"])
     return jsonify(ok=True)
 
 
@@ -5473,6 +5581,7 @@ def api_profile_prefs():
 @app.route("/api/auth/logout", methods=["POST"])
 @api_required
 def api_logout():
+    log_event("logout", g.user["username"], True, user_id=g.user["id"])
     clear_auth_session()
     return jsonify(ok=True, csrf=csrf_token())
 
@@ -5483,9 +5592,148 @@ def api_csrf():
     return jsonify(ok=True, csrf=csrf_token())
 
 
+def device_label(agent):
+    agent = agent or ""
+    if "Edg/" in agent:
+        return "Edge"
+    if "Chrome/" in agent or "CriOS/" in agent:
+        return "Chrome"
+    if "Firefox/" in agent or "FxiOS/" in agent:
+        return "Firefox"
+    if "Safari/" in agent:
+        return "Safari"
+    if "python" in agent.lower() or "postman" in agent.lower():
+        return "API"
+    return "Other"
+
+
+def event_payload(row):
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "identifier": row["identifier"] or "—",
+        "success": bool(row["success"]),
+        "detail": row["detail"] or "",
+        "ip": row["ip"] or "—",
+        "device": device_label(row["user_agent"]),
+        "created": row["created"],
+        "when": datetime.fromtimestamp(row["created"]).strftime("%d %b, %H:%M"),
+        "user_id": row["user_id"],
+    }
+
+
+@app.route("/api/admin/overview")
+@admin_required
+def api_admin_overview():
+    now = int(time.time())
+    day = now - 86400
+    week = now - 7 * 86400
+    overview = {
+        "users": fetchone("SELECT COUNT(*) AS n FROM users")["n"],
+        "logins_today": fetchone(
+            "SELECT COUNT(*) AS n FROM activity_events "
+            "WHERE kind = 'login' AND success = 1 AND created >= ?",
+            (day,),
+        )["n"],
+        "logins_week": fetchone(
+            "SELECT COUNT(*) AS n FROM activity_events "
+            "WHERE kind = 'login' AND success = 1 AND created >= ?",
+            (week,),
+        )["n"],
+        "failed_today": fetchone(
+            "SELECT COUNT(*) AS n FROM activity_events "
+            "WHERE kind = 'login' AND success = 0 AND created >= ?",
+            (day,),
+        )["n"],
+        "signups_week": fetchone(
+            "SELECT COUNT(*) AS n FROM activity_events "
+            "WHERE kind = 'signup' AND created >= ?",
+            (week,),
+        )["n"],
+        "active_week": fetchone(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM activity_events "
+            "WHERE kind = 'login' AND success = 1 AND created >= ?",
+            (week,),
+        )["n"],
+    }
+    recent = fetchall(
+        "SELECT * FROM activity_events ORDER BY created DESC, id DESC LIMIT 8"
+    )
+    return jsonify(
+        ok=True,
+        overview=overview,
+        recent=[event_payload(row) for row in recent],
+        server_time=now,
+    )
+
+
+@app.route("/api/admin/events")
+@admin_required
+def api_admin_events():
+    kinds = {"all", "login", "signup", "logout", "reset", "forgot", "password_change"}
+    kind = request.args.get("kind", "all")
+    if kind not in kinds:
+        kind = "all"
+    try:
+        limit = min(max(int(request.args.get("limit", 100)), 10), 200)
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except (TypeError, ValueError):
+        limit, offset = 100, 0
+    where = "" if kind == "all" else "WHERE kind = ?"
+    params = [] if kind == "all" else [kind]
+    params.extend([limit, offset])
+    rows = fetchall(
+        f"SELECT * FROM activity_events {where} "
+        "ORDER BY created DESC, id DESC LIMIT ? OFFSET ?",
+        tuple(params),
+    )
+    return jsonify(ok=True, events=[event_payload(row) for row in rows], shown=len(rows))
+
+
+@app.route("/api/admin/users")
+@admin_required
+def api_admin_users():
+    rows = fetchall(
+        """
+        SELECT u.id, u.username, u.email, u.country, u.language, u.welcome_done,
+               u.is_admin, u.created,
+               (SELECT MAX(created) FROM activity_events e
+                 WHERE e.user_id = u.id AND e.kind = 'login' AND e.success = 1) AS last_login,
+               (SELECT COUNT(*) FROM activity_events e
+                 WHERE e.user_id = u.id AND e.kind = 'login' AND e.success = 1) AS login_count,
+               (SELECT COUNT(*) FROM saved s WHERE s.user_id = u.id) AS saved_count
+        FROM users u
+        ORDER BY u.created DESC
+        LIMIT 200
+        """
+    )
+    users = []
+    for row in rows:
+        users.append(
+            {
+                "id": row["id"],
+                "username": row["username"],
+                "email": row["email"] or "—",
+                "country": row["country"],
+                "language": row["language"],
+                "joined": datetime.fromtimestamp(row["created"]).strftime("%d %b %Y"),
+                "last_login": (
+                    datetime.fromtimestamp(row["last_login"]).strftime("%d %b %Y, %H:%M")
+                    if row["last_login"]
+                    else "—"
+                ),
+                "login_count": row["login_count"],
+                "saved_count": row["saved_count"],
+                "is_admin": bool(row["is_admin"]),
+            }
+        )
+    return jsonify(ok=True, users=users, shown=len(users))
+
+
 @app.route("/logout", methods=["POST"])
 @login_required
 def logout():
+    log_event("logout", g.user["username"], True, user_id=g.user["id"])
     clear_auth_session()
     return redirect(url_for("login"))
 

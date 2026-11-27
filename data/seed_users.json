@@ -12,6 +12,7 @@
     "view_mode": "grid",
     "reader_font": "serif",
     "welcome_done": 1,
+    "is_admin": 1,
     "created": 1795336740
   }
 ]

@@ -57,7 +57,13 @@ Optional Vercel environment variables:
 
 - `NEWS_SECRET` — long random value; overrides the generated deployment secret.
 - `NEWS_DB` — connection string to a persistent database (accounts and saved stories).
+- `NEWS_ADMIN_USERS` — comma-separated usernames/emails that may open `/admin`.
 - `NEWS_SMTP_*` — for password recovery email.
+
+The seeded `Abdullah` account is an admin by default. Open `/admin` to see sign-ins,
+sign-ups, sign-outs, password changes, IP addresses, and account totals. Activity
+history is stored in the same database as accounts, so set `NEWS_DB` to keep it
+across Vercel cold starts and redeploys.
 
 A compact article bundle in `data/seed_articles.json` is loaded when a cold function
 starts with an empty `/tmp` database, so the newsroom is never blank. The original
