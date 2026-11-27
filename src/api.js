@@ -19,32 +19,64 @@ export function tr(key, fallback) {
   return value || fallback || key
 }
 
-export async function api(path, { method = 'GET', body, signal } = {}) {
+function applyCsrf(token) {
+  if (!token) return
+  BOOT.csrf = token
+  document.querySelectorAll('input[name="_csrf"]').forEach((el) => {
+    el.value = token
+  })
+}
+
+async function refreshCsrf() {
+  try {
+    const response = await fetch('/api/csrf', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+    const data = await response.json()
+    applyCsrf(data.csrf)
+  } catch (_) {
+    /* keep the old token; the next navigation will refresh the bootstrap */
+  }
+}
+
+async function request(path, { method = 'GET', body, signal } = {}, retried = false) {
+  const headers = { 'X-CSRF-Token': BOOT.csrf || '' }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const response = await fetch(path, {
+    method,
+    headers,
+    credentials: 'same-origin',
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+  })
+  let raw = ''
+  let data = {}
+  try {
+    raw = await response.text()
+    data = raw ? JSON.parse(raw) : {}
+  } catch (_) {
+    /* an error page may not be JSON */
+  }
+  if (!response.ok) {
+    if (!retried && response.status === 400 && /Invalid or missing CSRF token/i.test(raw)) {
+      await refreshCsrf()
+      return request(path, { method, body, signal }, true)
+    }
+    const error = new Error(data.error || data.detail || `Request failed (${response.status})`)
+    error.status = response.status
+    error.data = data
+    throw error
+  }
+  applyCsrf(data.csrf)
+  return data
+}
+
+export async function api(path, options = {}) {
   activeRequests += 1
   emitActivity()
   try {
-    const headers = { 'X-CSRF-Token': BOOT.csrf || '' }
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
-    const response = await fetch(path, {
-      method,
-      headers,
-      credentials: 'same-origin',
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal,
-    })
-    let data = {}
-    try {
-      data = await response.json()
-    } catch (_) {
-      /* an error page may not be JSON */
-    }
-    if (!response.ok) {
-      const error = new Error(data.error || data.detail || `Request failed (${response.status})`)
-      error.status = response.status
-      error.data = data
-      throw error
-    }
-    return data
+    return await request(path, options)
   } finally {
     activeRequests = Math.max(0, activeRequests - 1)
     emitActivity()
@@ -72,6 +104,8 @@ export function offerPasswordSave({ form, username, password, remember = true, n
     passField.value = password
     passField.name = 'password'
     passField.setAttribute('autocomplete', 'current-password')
+    const csrfField = form.querySelector('input[name="_csrf"]')
+    if (csrfField) csrfField.value = BOOT.csrf || ''
     form.action = '/api/auth/login'
     form.method = 'post'
     form.target = 'auth-save-frame'

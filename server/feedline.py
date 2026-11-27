@@ -5041,7 +5041,7 @@ def api_signup():
     session["lang"] = "en"
     session.permanent = remember
     sync_session_account(new_row)
-    return jsonify(ok=True, next="/welcome")
+    return jsonify(ok=True, next="/welcome", csrf=csrf_token())
 
 
 @app.route("/login")
@@ -5100,7 +5100,11 @@ def api_login():
     session["lang"] = row["language"]
     session.permanent = remember
     sync_session_account(row)
-    return jsonify(ok=True, next="/" if row["welcome_done"] else "/welcome")
+    return jsonify(
+        ok=True,
+        next="/" if row["welcome_done"] else "/welcome",
+        csrf=csrf_token(),
+    )
 
 
 @app.route("/api/auth/forgot", methods=["POST"])
@@ -5232,7 +5236,11 @@ def api_reset_password():
     session["lang"] = user["language"]
     session.permanent = remember
     sync_session_account(fresh)
-    return jsonify(ok=True, next="/" if user["welcome_done"] else "/welcome")
+    return jsonify(
+        ok=True,
+        next="/" if user["welcome_done"] else "/welcome",
+        csrf=csrf_token(),
+    )
 
 
 @app.route("/welcome")
@@ -5466,7 +5474,13 @@ def api_profile_prefs():
 @api_required
 def api_logout():
     clear_auth_session()
-    return jsonify(ok=True)
+    return jsonify(ok=True, csrf=csrf_token())
+
+
+@app.route("/api/csrf")
+def api_csrf():
+    """Let the SPA refresh its CSRF token after a session change."""
+    return jsonify(ok=True, csrf=csrf_token())
 
 
 @app.route("/logout", methods=["POST"])
